@@ -1,0 +1,99 @@
+import pandas as pd
+import numpy as np
+import shap
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+
+# ==========================================
+# 1. Reconstruct the best model pipeline from original data
+# ==========================================
+print("Reconstructing the best model pipeline from original data...")
+metadata = pd.read_csv('metadata.csv')
+expr_data = pd.read_csv('gene_expression_data.csv')
+df = pd.merge(metadata, expr_data, on='Subject_ID', how='inner')
+
+# Encode categorical variables consistently
+le_gender = LabelEncoder()
+df['Gender'] = le_gender.fit_transform(df['Gender'])
+df = pd.get_dummies(df, columns=['Center'], drop_first=True)
+
+X_orig = df.drop(columns=['Subject_ID', 'Label'])
+y_orig = df['Label']
+
+# Impute and extract Top 100 Features using SHAP
+imputer = SimpleImputer(strategy='median')
+X_orig_imputed = pd.DataFrame(imputer.fit_transform(X_orig), columns=X_orig.columns)
+
+base_model = RandomForestClassifier(n_estimators=100, random_state=42)
+base_model.fit(X_orig_imputed, y_orig)
+
+explainer = shap.TreeExplainer(base_model)
+sv = explainer.shap_values(X_orig_imputed)
+if isinstance(sv, list):
+    sv = sv[1]
+elif isinstance(sv, np.ndarray) and sv.ndim == 3:
+    sv = sv[:, :, 1]
+
+shap_importance = np.abs(sv).mean(axis=0)
+top_100_features = pd.DataFrame({'Feature': X_orig_imputed.columns, 'SHAP': shap_importance}).sort_values('SHAP', ascending=False)['Feature'].head(100).tolist()
+
+# Train the final best model (SVM with Top 100 features)
+scaler = StandardScaler()
+X_orig_scaled = pd.DataFrame(scaler.fit_transform(X_orig_imputed[top_100_features]), columns=top_100_features)
+final_model = SVC(probability=True, random_state=42)
+final_model.fit(X_orig_scaled, y_orig)
+
+print(f"Pipeline ready. Using Top {len(top_100_features)} features.")
+
+# ==========================================
+# 2. Load and preprocess the 100 mock patients
+# ==========================================
+print("Loading mock data...")
+try:
+    # Attempt to load separate mock files (mirroring original structure)
+    mock_meta = pd.read_csv('mock_metadata.csv')
+    mock_expr = pd.read_csv('mock_gene_expression.csv')
+    mock_df = pd.merge(mock_meta, mock_expr, on='Subject_ID', how='inner')
+except FileNotFoundError:
+    # Fallback: attempt to load a single merged mock file
+    print("Separate mock files not found. Attempting to load 'mock_data.csv'...")
+    mock_df = pd.read_csv('mock_data.csv')
+
+# Apply the EXACT same preprocessing using original fitted objects
+mock_df['Gender'] = le_gender.transform(mock_df['Gender'])
+mock_df = pd.get_dummies(mock_df, columns=['Center'], drop_first=True)
+
+# Ensure all dummy columns from original data exist in mock data (fill missing centers with 0)
+for col in df.columns:
+    if col not in mock_df.columns:
+        mock_df[col] = 0
+
+# Drop Subject_ID and Label (Label is ignored if it exists in mock data)
+X_mock = mock_df.drop(columns=['Subject_ID', 'Label'], errors='ignore')
+
+# Impute using the ORIGINAL imputer (prevents data leakage)
+X_mock_imputed = pd.DataFrame(imputer.transform(X_mock), columns=X_mock.columns)
+
+# Select the exact same top 100 features
+X_mock_selected = X_mock_imputed[top_100_features]
+
+# Scale using the ORIGINAL scaler
+X_mock_scaled = pd.DataFrame(scaler.transform(X_mock_selected), columns=top_100_features)
+
+# ==========================================
+# 3. Predict and save results
+# ==========================================
+predictions = final_model.predict(X_mock_scaled)
+
+result_df = pd.DataFrame({
+    'Subject_ID': mock_df['Subject_ID'],
+    'Predicted_Label': predictions
+})
+
+result_df.to_csv('result.csv', index=False)
+print("Predictions completed successfully.")
+print("Results saved to 'result.csv'.")
+print("\nPreview of result.csv:")
+print(result_df.head(10))
