@@ -1,0 +1,117 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import shap
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.model_selection import StratifiedKFold
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.base import clone
+
+#this loads and merges datasets dropping unmatched samples
+metadata = pd.read_csv('metadata.csv')
+expr_data = pd.read_csv('gene_expression_data.csv')
+df = pd.merge(metadata, expr_data, on='Subject_ID', how='inner')
+
+#this preprocesses categorical variables
+df['Gender'] = LabelEncoder().fit_transform(df['Gender'])
+df = pd.get_dummies(df, columns=['Center'], drop_first=True)
+X = df.drop(columns=['Subject_ID', 'Label'])
+y = df['Label']
+
+#this imputes missing values with median
+imputer = SimpleImputer(strategy='median')
+X_imputed = pd.DataFrame(imputer.fit_transform(X), columns=X.columns)
+
+#this calculates SHAP values and ranks features globally
+base_model = RandomForestClassifier(n_estimators=100, random_state=42)
+base_model.fit(X_imputed, y)
+explainer = shap.TreeExplainer(base_model)
+sv = explainer.shap_values(X_imputed)
+if isinstance(sv, list):
+    sv = sv[1]
+elif isinstance(sv, np.ndarray) and sv.ndim == 3:
+    sv = sv[:, :, 1]
+shap_importance = np.abs(sv).mean(axis=0)
+ranked_features = pd.DataFrame({'Feature': X_imputed.columns, 'SHAP': shap_importance}).sort_values('SHAP', ascending=False)['Feature'].tolist()
+
+#this defines the feature subset sizes and default models
+subset_sizes = [10, 20, 50, 100]
+models = {
+    'Logistic Regression': LogisticRegression(max_iter=1000, random_state=42),
+    'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42),
+    'Gradient Boosting': GradientBoostingClassifier(n_estimators=100, random_state=42),
+    'Support Vector Machine': SVC(probability=True, random_state=42)
+}
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+results = []
+
+#this loops through subset sizes and models to perform robust 5-fold CV
+for n_feats in subset_sizes:
+    current_features = ranked_features[:n_feats]
+    X_subset = X_imputed[current_features]
+    
+    for name, model_template in models.items():
+        fold_f1, fold_acc, fold_auc = [], [], []
+        
+        for train_idx, test_idx in cv.split(X_subset, y):
+            X_train, X_test = X_subset.iloc[train_idx], X_subset.iloc[test_idx]
+            y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+            
+            #this scales strictly inside the CV loop to prevent data leakage
+            scaler = StandardScaler()
+            X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=current_features)
+            X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=current_features)
+            
+            #this clones the model to ensure a fresh state for each fold
+            model = clone(model_template)
+            model.fit(X_train_scaled, y_train)
+            
+            y_pred = model.predict(X_test_scaled)
+            y_prob = model.predict_proba(X_test_scaled)[:, 1]
+            
+            fold_acc.append(accuracy_score(y_test, y_pred))
+            fold_f1.append(f1_score(y_test, y_pred, zero_division=0))
+            fold_auc.append(roc_auc_score(y_test, y_prob))
+            
+        results.append({
+            'Features': n_feats,
+            'Model': name,
+            'Mean F1': np.mean(fold_f1),
+            'Mean Acc': np.mean(fold_acc),
+            'Mean AUC': np.mean(fold_auc)
+        })
+
+#this compiles results into a dataframe
+results_df = pd.DataFrame(results)
+
+#this plots the performance metrics across different feature subset sizes
+plt.figure(figsize=(18, 5))
+metrics = ['Mean F1', 'Mean Acc', 'Mean AUC']
+titles = ['Mean F1-Score', 'Mean Accuracy', 'Mean ROC-AUC']
+
+for i, (metric, title) in enumerate(zip(metrics, titles)):
+    plt.subplot(1, 3, i+1)
+    for name in models.keys():
+        subset_data = results_df[results_df['Model'] == name]
+        plt.plot(subset_data['Features'], subset_data[metric], marker='o', label=name, linewidth=2)
+    
+    plt.title(title)
+    plt.xlabel('Number of Top Features (SHAP)')
+    plt.ylabel('Score')
+    plt.xticks(subset_sizes)
+    plt.ylim(0, 1.05)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+#this prints the final summary table
+print("\n--- Feature Subset Performance Summary ---")
+print(results_df.to_string(index=False))
