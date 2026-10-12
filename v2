@@ -1,0 +1,182 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import shap
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.model_selection import StratifiedKFold
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.base import clone
+
+# ==========================================
+# 1. Load and preprocess training data
+# ==========================================
+metadata = pd.read_csv('metadata.csv')
+expr_data = pd.read_csv('gene_expression_data.csv')
+df = pd.merge(metadata, expr_data, on='Subject_ID', how='inner')
+
+le_gender = LabelEncoder()
+df['Gender'] = le_gender.fit_transform(df['Gender'])
+df = pd.get_dummies(df, columns=['Center'], drop_first=True)
+
+X = df.drop(columns=['Subject_ID', 'Label'])
+y = df['Label']
+
+imputer = SimpleImputer(strategy='median')
+X_imputed = pd.DataFrame(imputer.fit_transform(X), columns=X.columns)
+
+# ==========================================
+# 2. SHAP feature ranking
+# ==========================================
+base_model = RandomForestClassifier(n_estimators=100, random_state=42)
+base_model.fit(X_imputed, y)
+explainer = shap.TreeExplainer(base_model)
+sv = explainer.shap_values(X_imputed)
+if isinstance(sv, list):
+    sv = sv[1]
+elif isinstance(sv, np.ndarray) and sv.ndim == 3:
+    sv = sv[:, :, 1]
+
+shap_importance = np.abs(sv).mean(axis=0)
+ranked_features = pd.DataFrame({'Feature': X_imputed.columns, 'SHAP': shap_importance}).sort_values('SHAP', ascending=False)['Feature'].tolist()
+
+# ==========================================
+# 3. Robust 5-Fold CV across feature subsets
+# ==========================================
+subset_sizes = [10, 20, 50, 100]
+models = {
+    'Logistic Regression': LogisticRegression(max_iter=1000, random_state=42),
+    'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42),
+    'Gradient Boosting': GradientBoostingClassifier(n_estimators=100, random_state=42),
+    'Support Vector Machine': SVC(probability=True, random_state=42)
+}
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+results = []
+
+for n_feats in subset_sizes:
+    current_features = ranked_features[:n_feats]
+    X_subset = X_imputed[current_features]
+    
+    for name, model_template in models.items():
+        fold_f1, fold_acc, fold_auc = [], [], []
+        
+        for train_idx, test_idx in cv.split(X_subset, y):
+            X_train, X_test = X_subset.iloc[train_idx], X_subset.iloc[test_idx]
+            y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+            
+            scaler = StandardScaler()
+            X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=current_features)
+            X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=current_features)
+            
+            model = clone(model_template)
+            model.fit(X_train_scaled, y_train)
+            
+            y_pred = model.predict(X_test_scaled)
+            y_prob = model.predict_proba(X_test_scaled)[:, 1]
+            
+            fold_acc.append(accuracy_score(y_test, y_pred))
+            fold_f1.append(f1_score(y_test, y_pred, zero_division=0))
+            fold_auc.append(roc_auc_score(y_test, y_prob))
+            
+        results.append({
+            'Features': n_feats,
+            'Model': name,
+            'Mean F1': np.mean(fold_f1),
+            'Mean Acc': np.mean(fold_acc),
+            'Mean AUC': np.mean(fold_auc)
+        })
+
+results_df = pd.DataFrame(results)
+
+# ==========================================
+# 4. Plotting and Summary
+# ==========================================
+plt.figure(figsize=(18, 5))
+metrics = ['Mean F1', 'Mean Acc', 'Mean AUC']
+titles = ['Mean F1-Score', 'Mean Accuracy', 'Mean ROC-AUC']
+
+for i, (metric, title) in enumerate(zip(metrics, titles)):
+    plt.subplot(1, 3, i+1)
+    for name in models.keys():
+        subset_data = results_df[results_df['Model'] == name]
+        plt.plot(subset_data['Features'], subset_data[metric], marker='o', label=name, linewidth=2)
+    
+    plt.title(title)
+    plt.xlabel('Number of Top Features (SHAP)')
+    plt.ylabel('Score')
+    plt.xticks(subset_sizes)
+    plt.ylim(0, 1.05)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+print("\n--- Feature Subset Performance Summary ---")
+print(results_df.to_string(index=False))
+
+# ==========================================
+# 5. Load Mock Data and Predict
+# ==========================================
+print("\nLoading mock data for final prediction...")
+try:
+    mock_meta = pd.read_csv('mock_metadata.csv')
+    mock_expr = pd.read_csv('mock_gene_expression.csv')
+    mock_df = pd.merge(mock_meta, mock_expr, on='Subject_ID', how='inner')
+except FileNotFoundError:
+    mock_df = pd.read_csv('mock_data.csv')
+
+#this applies exact same categorical encoding
+mock_df['Gender'] = le_gender.transform(mock_df['Gender'])
+mock_df = pd.get_dummies(mock_df, columns=['Center'], drop_first=True)
+
+#this aligns mock columns with training data to prevent shape mismatch
+for col in df.columns:
+    if col not in mock_df.columns:
+        mock_df[col] = 0
+
+X_mock = mock_df.drop(columns=['Subject_ID', 'Label'], errors='ignore')
+X_mock_imputed = pd.DataFrame(imputer.transform(X_mock), columns=X_mock.columns)
+
+#this identifies the best model configuration from CV results
+best_idx = results_df['Mean F1'].idxmax()
+best_n_feats = results_df.loc[best_idx, 'Features']
+best_model_name = results_df.loc[best_idx, 'Model']
+best_features = ranked_features[:best_n_feats]
+
+print(f"Retraining best model: {best_model_name} with top {best_n_feats} features on full training data...")
+
+#this retrains the best model on the full training dataset
+scaler_final = StandardScaler()
+X_train_full_scaled = pd.DataFrame(scaler_final.fit_transform(X_imputed[best_features]), columns=best_features)
+
+if best_model_name == 'Logistic Regression':
+    final_model = LogisticRegression(max_iter=1000, random_state=42)
+elif best_model_name == 'Random Forest':
+    final_model = RandomForestClassifier(n_estimators=100, random_state=42)
+elif best_model_name == 'Gradient Boosting':
+    final_model = GradientBoostingClassifier(n_estimators=100, random_state=42)
+elif best_model_name == 'Support Vector Machine':
+    final_model = SVC(probability=True, random_state=42)
+
+final_model.fit(X_train_full_scaled, y)
+
+#this predicts on mock data using the exact same fitted scaler to prevent data leakage
+X_mock_scaled = pd.DataFrame(scaler_final.transform(X_mock_imputed[best_features]), columns=best_features)
+predictions = final_model.predict(X_mock_scaled)
+
+result_df = pd.DataFrame({
+    'Subject_ID': mock_df['Subject_ID'],
+    'Predicted_Label': predictions
+})
+result_df.to_csv('result.csv', index=False)
+
+print("Predictions completed successfully.")
+print("Results saved to 'result.csv'.")
+print("\nPreview of result.csv:")
+print(result_df.head(10))
