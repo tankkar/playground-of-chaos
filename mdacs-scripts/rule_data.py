@@ -13,8 +13,8 @@ a rule fires wherever its incorrect text appears (body, tables, headers,
 footers, footnotes, endnotes), with one tracked change per occurrence.
 
 EXCLUDED: the revision-history table. Its historical rows record the old
-terminology on purpose (e.g. GN-00's 2025 row 「醫療器械行政管理制度」
-取代「醫療儀器行政管理制度」 — rewriting the quoted old term would falsify
+terminology on purpose (e.g. GN-00's 2025 row 「醫療器械行政管理制度」
+取代「醫療儀器行政管理制度」 — rewriting the quoted old term would falsify
 the record). The engine skips rule rows there, and the post-pack check
 counts leftovers OUTSIDE that table only.
 

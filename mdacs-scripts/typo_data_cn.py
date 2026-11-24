@@ -99,7 +99,7 @@ TYPOS = [
     # ---------- GN-00 ----------
     ("GN-00 section 2.10",
      "頸動脈（頸內總動脈及頸外總動脈）",
-     "頸動脈（頸頸總動脈、頸內動脈及頸外動脈）",
+     "頸動脈（頸總動脈、頸內動脈及頸外動脈）",
      "Wrong terms — no arteries named 「頸內總動脈」/「頸外總動脈」 exist; the English "
      "\"carotid arteries (common internal and external)\" refers to the common, internal "
      "and external carotid arteries"),
