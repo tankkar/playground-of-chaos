@@ -132,7 +132,7 @@ for line in raw.splitlines():
     if m:
         if cur:
             user_nfc[cur] = unicodedata.normalize("NFC", "\n".join(buf))
-        cur = FILE2ID.get(m.group(1))
+        cur = FILE2ID[m.group(1)]
         buf = []
     elif cur is not None:
         buf.append(line)
@@ -361,7 +361,7 @@ for i, d in enumerate(DOC_ORDER):
     r += 1
 
 notes4 = [
-    "The compatibility ideographs (U+F900–FAD9, e.g. \uF9C1→療, \uFA08→行, \uF99C→列) are legacy Big5 codepoints present in BOTH the provided files and the official MDD PDFs — they render identically and are not typos. NFC normalisation is recommended when machine-processing the text.",
+    "The compatibility ideographs (U+F900–FAD9, e.g. 療→療, 行→行, 列→列) are legacy Big5 codepoints present in BOTH the provided files and the official MDD PDFs — they render identically and are not typos. NFC normalisation is recommended when machine-processing the text.",
     "Inter-CJK spaces (e.g. 醫療 器械) come from .docx justification and PDF text-layer extraction; the official PDFs show the same pattern.",
     "Appeal-period units (for awareness, not typos): the appeal window runs in CALENDAR days (department confirmation, 9 Nov 2026), so the 「曆日」 wording in COP-05 5.1 and GN-06 6.1 is correct and was removed from the findings that day. For the record the corpus is inconsistent: every English appeal clause says \"working days\" except English COP-01 4.2.4 (\"calendar days\"), and every Chinese appeal clause says 「工作日」 except COP-05 5.1 and GN-06 6.1 (「曆日」) — including Chinese COP-01 4.2.1, which says 「工作日」 although its own English counterpart says calendar days. The unit wording across the corpus may deserve a policy-level review.",
     "GACI → Global ACI: MDD corrected this abbreviation in COP-02/03 and GN-02/04/08 on 29 Oct 2026. GN-06 and GN-09 still carry 「GACI」 in the body text (both languages) — see Sheet 'Typos (TC)'. GN-06's own revision record already claims the correction.",
