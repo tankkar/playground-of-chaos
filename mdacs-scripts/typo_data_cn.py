@@ -11,7 +11,7 @@ Information & Publications > Code of Practice, Traditional Chinese pages).
 All findings below appear verbatim in the current official files.
 Cross-language items (working days, reference titles, access dates, form
 codes, quoted English) were additionally verified against the official
-English PDFs. Deliberately NOT flagged: Cap. 231 cited as 《不良不良廣告(醫藥)條例》
+English PDFs. Deliberately NOT flagged: Cap. 231 cited as 《不良廣告(醫藥)條例》
 (matches current Department of Health usage), mainland-standard titles quoted
 in simplified Chinese inside RS-01 / TR-010, TOC/clause-numbering and
 version-date observations, and stylistic variants (爲/為, 疱/皰, 内/內).
@@ -98,8 +98,8 @@ TYPOS = [
      "(cf. COP-01 4.2.1 「就拒絕其表列申請」)"),
     # ---------- GN-00 ----------
     ("GN-00 section 2.10",
-     "頸動動脈（頸內總動脈及頸外總動脈）",
-     "頸動脈（頸總動脈、頸內動脈及頸外動脈）",
+     "頸動脈（頸內總動脈及頸外總動脈）",
+     "頸動脈（頸頸總動脈、頸內動脈及頸外動脈）",
      "Wrong terms — no arteries named 「頸內總動脈」/「頸外總動脈」 exist; the English "
      "\"carotid arteries (common internal and external)\" refers to the common, internal "
      "and external carotid arteries"),
@@ -330,5 +330,5 @@ TYPOS = [
 # the per-document rows above. Not typo findings: editorial directives.
 # EMPTY since 9 Nov 2026: the 品質管理 -> 質量管理 directive was retracted
 # (senior review — that substitution will be decided case by case), so no
-corpus-wide replacement fires any more.
+# corpus-wide replacement fires any more.
 GLOBAL_RULES = []
